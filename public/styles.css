@@ -252,3 +252,23 @@ tr.row-error { background: rgba(107,102,128,.12); }
 }
 .frag-h3 { font-size: 14px; margin: 16px 0 8px; color: var(--text); }
 .frag-subpanel h3.frag-h3 { margin-top: 4px; }
+
+/* ---------- 冲突顺延预演 ---------- */
+.hint code { color: var(--accent); font-size: 12px; }
+.defer-controls {
+  display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+  margin: 12px 0;
+}
+.defer-controls label { min-width: 260px; flex: 1; }
+.defer-btns { margin-left: 10px; display: inline-flex; gap: 6px; flex-wrap: wrap; }
+#deferError { margin: 10px 0 0; }
+.defer-result { margin-top: 14px; }
+.defer-result .form-actions { margin-top: 14px; }
+.defer-conflicts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 24px;
+}
+@media (max-width: 760px) {
+  .defer-conflicts { grid-template-columns: 1fr; }
+}

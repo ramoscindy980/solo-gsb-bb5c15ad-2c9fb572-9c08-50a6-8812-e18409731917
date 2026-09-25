@@ -6,6 +6,7 @@ const express = require('express');
 const { JsonStore } = require('./store');
 const { evaluate, validateCueBody } = require('./scheduler');
 const { buildFragment } = require('./fragment');
+const { planDefer } = require('./defer');
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, '..', 'data', 'cues.json');
@@ -25,6 +26,7 @@ function snapshot() {
     schedule: result.schedule,
     conflicts: result.conflicts,
     graphErrors: result.errors,
+    version: store.version(),
   };
 }
 
@@ -117,6 +119,43 @@ app.delete('/api/cues/:id', (req, res) => {
   // 删除后全部后继（链路上的相对提示）时间会随下次 evaluate 自动重算
   store.persist();
   res.json({ ok: true, removedId: removed.id, ...snapshot() });
+});
+
+// ---- 单条提示冲突顺延（预演只读；确认时核对版本后才原子保存）----
+
+app.post('/api/cues/:id/defer-preview', (req, res) => {
+  try {
+    const plan = planDefer(store.cues, req.params.id);
+    const { nextTarget, ...preview } = plan; // nextTarget 仅供确认时落盘，不下发
+    res.json({ baseVersion: store.version(), ...preview });
+  } catch (e) {
+    return fail(res, e.status || 400, e.message, { errors: e.errors || [e.message] });
+  }
+});
+
+app.post('/api/cues/:id/defer-confirm', (req, res) => {
+  const baseVersion = req.body && req.body.baseVersion;
+  if (typeof baseVersion !== 'string' || !baseVersion) {
+    return fail(res, 400, '缺少预演版本号 baseVersion，请先重新预演');
+  }
+  // 重新核对预演所依据的提示单版本：已变化则拒绝并要求重新预演
+  if (baseVersion !== store.version()) {
+    return fail(res, 409, '提示单已发生变化，预演结果已失效，请重新预演后再确认');
+  }
+  // 版本一致 → 当前数据与预演时相同，重算方案必然与预演一致
+  let plan;
+  try {
+    plan = planDefer(store.cues, req.params.id);
+  } catch (e) {
+    return fail(res, e.status || 400, e.message, { errors: e.errors || [e.message] });
+  }
+  if (!plan.moved) {
+    return fail(res, 400, '该提示当前位置已落在完整空位，无需顺延，没有需要保存的修改');
+  }
+  const idx = store.cues.findIndex((c) => c.id === req.params.id);
+  store.cues[idx] = plan.nextTarget;
+  store.persist(); // 原子写入（临时文件 + rename）
+  res.json({ ok: true, applied: plan.target, ...snapshot() });
 });
 
 // ---- 片段排练单（只读，不修改原提示单）----

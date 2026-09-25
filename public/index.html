@@ -34,6 +34,52 @@
       <ul id="conflictList" class="conflict-list"></ul>
     </section>
 
+    <section class="panel" id="deferPanel" hidden>
+      <h2>🔄 单条提示顺延预演</h2>
+      <p class="hint">
+        在不<strong>提前</strong>原开始时刻的前提下，为选中的冲突提示在其通道上寻找<strong>最早完整空位</strong>：
+        遇到占用就推到该占用结束，首尾相接可用。固定开始的提示改 <code>fixedAt</code>，相对开始的提示只增加
+        <code>delayAfter</code>；其后继随调度器重算，不作为搜索障碍。<strong>预演不写入原数据</strong>，
+        确认时服务端会重新核对提示单版本，已变化则拒绝，未变化才原子保存。
+      </p>
+      <div class="defer-controls">
+        <label>选择要顺延的冲突提示
+          <select id="deferCue"></select>
+        </label>
+        <button type="button" class="btn primary" id="deferPreviewBtn">预演顺延</button>
+      </div>
+      <div id="deferError" class="banner err hidden"></div>
+      <div id="deferResult" class="defer-result" hidden>
+        <div class="frag-meta" id="deferMeta"></div>
+
+        <h3 class="frag-h3">被顺延的提示（前后时刻，秒）</h3>
+        <div class="table-wrap">
+          <table id="deferTable">
+            <thead>
+              <tr><th>名称</th><th>通道</th><th>原开始</th><th>原结束</th><th>新开始</th><th>新结束</th></tr>
+            </thead>
+            <tbody id="deferTbody"></tbody>
+          </table>
+        </div>
+
+        <div class="defer-conflicts">
+          <div>
+            <h3 class="frag-h3">✅ 顺延后消失的冲突</h3>
+            <ul id="deferRemovedList" class="conflict-list"></ul>
+          </div>
+          <div>
+            <h3 class="frag-h3">⚠️ 顺延后新增的冲突</h3>
+            <ul id="deferAddedList" class="conflict-list"></ul>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn primary" id="deferConfirmBtn">确认顺延并保存</button>
+          <button type="button" class="btn ghost" id="deferCancelBtn">取消</button>
+        </div>
+      </div>
+    </section>
+
     <section class="panel" id="fragmentPanel">
       <h2>✂️ 片段排练单（按原演出时间窗截取）</h2>
       <p class="hint">

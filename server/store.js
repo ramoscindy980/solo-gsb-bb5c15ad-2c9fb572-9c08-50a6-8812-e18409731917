@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 // 首次启动时写入的示例数据（包含同通道重叠场景，便于排练时直接看到冲突标记）
 const SEED_CUES = [
@@ -93,6 +94,11 @@ class JsonStore {
     const tmp = `${this.filePath}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify({ cues: this.cues }, null, 2) + '\n', 'utf8');
     fs.renameSync(tmp, this.filePath);
+  }
+
+  /** 当前提示单内容版本（内容哈希）；任何增删改都会改变它，用于顺延预演的确认核对 */
+  version() {
+    return crypto.createHash('sha1').update(JSON.stringify(this.cues)).digest('hex');
   }
 }
 
