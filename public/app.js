@@ -5,6 +5,8 @@ let state = { cues: [], schedule: [], conflicts: [], graphErrors: [] };
 let editingId = null;
 let fragment = null; // 当前片段预览结果
 let fragmentStale = false; // 原提示单发生增删改后，旧预览失效
+let deferPlan = null; // 当前顺延预演结果
+let deferStale = false; // 提示单发生增删改后，旧预演失效（确认时服务端也会再核对版本）
 
 const $ = (sel) => document.querySelector(sel);
 const el = (tag, cls, text) => {
@@ -43,6 +45,7 @@ async function api(method, url, body) {
     const errors = (data && data.error && data.error.errors) || [msg];
     const e = new Error(msg);
     e.errors = errors;
+    e.status = res.status;
     throw e;
   }
   return data;
@@ -52,6 +55,7 @@ async function reload(notice) {
   const data = await api('GET', '/api/cues');
   state = data;
   markFragmentStale();
+  markDeferStale();
   render();
   if (notice) showBanner(notice, 'ok');
 }
@@ -112,6 +116,15 @@ function renderConflicts(conflictIds) {
     li.append(document.createTextNode(
       `「${cueName(a)}」与「${cueName(b)}」在 ${fmtNum(cf.start)}s – ${fmtNum(cf.end)}s 重叠（左闭右开）`
     ));
+    const acts = el('span', 'conflict-actions');
+    for (const id of [a, b]) {
+      const btn = el('button', 'btn small', `顺延「${cueName(id)}」`);
+      btn.type = 'button';
+      btn.title = '预演把该提示顺推到本通道最早完整空位';
+      btn.addEventListener('click', () => previewDeferral(id));
+      acts.append(btn);
+    }
+    li.append(acts);
     list.append(li);
     conflictIds.add(a);
     conflictIds.add(b);
@@ -641,6 +654,147 @@ function downloadFragment() {
   URL.revokeObjectURL(url);
 }
 
+// ---------------- 冲突顺延预演 ----------------
+function showDeferError(messages) {
+  const panel = $('#deferPanel');
+  panel.hidden = false;
+  $('#deferResult').hidden = true;
+  const box = $('#deferError');
+  box.className = 'banner err';
+  box.innerHTML = '';
+  box.append(el('strong', null, '无法预演顺延：'));
+  const ul = el('ul');
+  ul.style.margin = '6px 0 0';
+  ul.style.paddingLeft = '18px';
+  for (const m of [].concat(messages)) ul.append(el('li', null, m));
+  box.append(ul);
+  box.classList.remove('hidden');
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function clearDefer() {
+  deferPlan = null;
+  deferStale = false;
+  $('#deferPanel').hidden = true;
+  $('#deferResult').hidden = true;
+  $('#deferError').classList.add('hidden');
+}
+
+function markDeferStale() {
+  if (!deferPlan) return;
+  deferStale = true;
+  $('#deferConfirmBtn').disabled = true;
+  const meta = $('#deferMeta');
+  if (meta) {
+    meta.classList.add('stale');
+    meta.textContent = '提示单已变更，本预演已失效，请重新从冲突面板发起预演。';
+  }
+}
+
+function deferConflictItems(listEl, items) {
+  listEl.innerHTML = '';
+  for (const cf of items) {
+    const [a, b] = cf.cueIds;
+    const li = el('li');
+    li.append(el('span', 'tag', cf.channel));
+    li.append(document.createTextNode(
+      `「${cueName(a)}」与「${cueName(b)}」在 ${fmtNum(cf.start)}s – ${fmtNum(cf.end)}s 重叠（左闭右开）`
+    ));
+    listEl.append(li);
+  }
+}
+
+function renderDefer() {
+  const panel = $('#deferPanel');
+  panel.hidden = false;
+  $('#deferError').classList.add('hidden');
+  $('#deferResult').hidden = false;
+
+  const t = deferPlan.target;
+  const adj = deferPlan.adjust;
+  const meta = $('#deferMeta');
+  meta.className = 'frag-meta' + (deferStale ? ' stale' : ' ok');
+  if (!deferPlan.changed) {
+    meta.textContent = `「${t.name}」（${deferPlan.channel}）当前位置已无冲突，无需顺延。`;
+  } else {
+    const how = adj.field === 'fixedAt'
+      ? `固定开始 ${fmtNum(adj.from)}s → ${fmtNum(adj.to)}s`
+      : `相对延迟 +${fmtNum(adj.from)}s → +${fmtNum(adj.to)}s（增加 ${fmtNum(adj.delta)}s）`;
+    meta.textContent =
+      `「${t.name}」（${deferPlan.channel}）顺推到最早完整空位：` +
+      `${fmtNum(t.oldStart)}s – ${fmtNum(t.oldEnd)}s → ${fmtNum(t.newStart)}s – ${fmtNum(t.newEnd)}s` +
+      `｜${how}｜被顺延 ${deferPlan.moved.length} 条` +
+      `｜新增冲突 ${deferPlan.conflictsAdded.length} 处｜消失冲突 ${deferPlan.conflictsRemoved.length} 处` +
+      (deferStale ? '｜⚠️ 提示单已变更，预演失效' : '｜确认后才会写入');
+  }
+
+  const tbody = $('#deferTbody');
+  tbody.innerHTML = '';
+  for (const m of deferPlan.moved) {
+    const tr = el('tr');
+    tr.append(el('td', 'name-cell', m.name));
+    tr.append(el('td', null, m.channel));
+    tr.append(el('td', 'num', fmtNum(m.oldStart)));
+    tr.append(el('td', 'num', fmtNum(m.oldEnd)));
+    tr.append(el('td', 'num', fmtNum(m.newStart)));
+    tr.append(el('td', 'num', fmtNum(m.newEnd)));
+    const noteTd = el('td');
+    noteTd.append(el('span', m.isTarget ? 'pill ok' : 'pill unknown',
+      m.isTarget ? '目标提示（顺推）' : '后继随调度器重算'));
+    tr.append(noteTd);
+    tbody.append(tr);
+  }
+
+  const addedPanel = $('#deferAddedPanel');
+  addedPanel.hidden = !deferPlan.conflictsAdded.length;
+  deferConflictItems($('#deferAddedList'), deferPlan.conflictsAdded);
+
+  const removedPanel = $('#deferRemovedPanel');
+  removedPanel.hidden = !deferPlan.conflictsRemoved.length;
+  deferConflictItems($('#deferRemovedList'), deferPlan.conflictsRemoved);
+
+  $('#deferConfirmBtn').disabled = deferStale || !deferPlan.changed;
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function previewDeferral(cueId) {
+  try {
+    deferPlan = await api('POST', '/api/deferrals/preview', { cueId });
+    deferStale = false;
+    renderDefer();
+  } catch (err) {
+    deferPlan = null;
+    showDeferError(err.errors || [err.message]);
+  }
+}
+
+async function confirmDeferral() {
+  if (!deferPlan || deferStale || !deferPlan.changed) return;
+  const btn = $('#deferConfirmBtn');
+  btn.disabled = true;
+  try {
+    await api('POST', '/api/deferrals/confirm', {
+      cueId: deferPlan.cueId,
+      baseVersion: deferPlan.baseVersion,
+    });
+    clearDefer();
+    await reload('已顺延并保存，后继提示已重算');
+  } catch (err) {
+    if (err.status === 409) {
+      // 版本不一致：预演所依据的提示单已变化，要求重新预演
+      deferStale = true;
+      $('#deferConfirmBtn').disabled = true;
+      const meta = $('#deferMeta');
+      meta.classList.add('stale');
+      meta.textContent = '提示单在预演后已变化，本次确认被拒绝，请重新从冲突面板发起预演。';
+      showBanner('提示单已变化，预演失效，请重新预演', 'err');
+    } else {
+      showBanner(err.errors.join('\n') || err.message, 'err');
+      btn.disabled = false;
+    }
+  }
+}
+
 // ---------------- 初始化 ----------------
 document.querySelectorAll('input[name="startType"]').forEach((r) =>
   r.addEventListener('change', syncStartBoxes)
@@ -649,6 +803,8 @@ $('#cueForm').addEventListener('submit', submitForm);
 $('#cancelEdit').addEventListener('click', () => resetForm());
 $('#fragmentForm').addEventListener('submit', previewFragment);
 $('#frDownloadBtn').addEventListener('click', downloadFragment);
+$('#deferConfirmBtn').addEventListener('click', confirmDeferral);
+$('#deferCancelBtn').addEventListener('click', () => clearDefer());
 
 syncStartBoxes();
 reload().catch((err) => showBanner(`加载失败：${err.message}`, 'err', true));

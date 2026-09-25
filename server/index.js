@@ -6,6 +6,7 @@ const express = require('express');
 const { JsonStore } = require('./store');
 const { evaluate, validateCueBody } = require('./scheduler');
 const { buildFragment } = require('./fragment');
+const { cuesVersion, planDeferral } = require('./defer');
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, '..', 'data', 'cues.json');
@@ -117,6 +118,54 @@ app.delete('/api/cues/:id', (req, res) => {
   // 删除后全部后继（链路上的相对提示）时间会随下次 evaluate 自动重算
   store.persist();
   res.json({ ok: true, removedId: removed.id, ...snapshot() });
+});
+
+// ---- 冲突顺延预演（预演只读；确认时核对版本，一致才原子保存）----
+
+app.post('/api/deferrals/preview', (req, res) => {
+  const cueId = req.body && req.body.cueId;
+  if (typeof cueId !== 'string' || !cueId.trim()) {
+    return fail(res, 400, '缺少要顺延的提示 cueId');
+  }
+  try {
+    res.json(planDeferral(store.cues, cueId.trim()));
+  } catch (e) {
+    return fail(res, e.status || 400, e.message, { errors: e.errors || [e.message] });
+  }
+});
+
+app.post('/api/deferrals/confirm', (req, res) => {
+  const body = req.body || {};
+  const cueId = typeof body.cueId === 'string' ? body.cueId.trim() : '';
+  if (!cueId) return fail(res, 400, '缺少要顺延的提示 cueId');
+
+  // 重新核对预演所依据的提示单版本：已变化则拒绝并要求重新预演
+  if (typeof body.baseVersion !== 'string' || body.baseVersion !== cuesVersion(store.cues)) {
+    return fail(res, 409, '提示单在预演后已发生变化，预演结果失效，请重新预演', {
+      code: 'version_mismatch',
+    });
+  }
+
+  // 版本一致 ⇒ 数据与预演时完全相同，重算同一计划再应用
+  let plan;
+  try {
+    plan = planDeferral(store.cues, cueId);
+  } catch (e) {
+    return fail(res, e.status || 400, e.message, { errors: e.errors || [e.message] });
+  }
+  if (!plan.changed) {
+    return fail(res, 400, '该提示当前位置已无冲突，无需顺延');
+  }
+
+  const idx = store.cues.findIndex((c) => c.id === cueId);
+  const cue = store.cues[idx];
+  store.cues[idx] =
+    cue.startType === 'fixed'
+      ? { ...cue, fixedAt: plan.adjust.to }
+      : { ...cue, delayAfter: plan.adjust.to };
+
+  store.persist(); // 原子写入（临时文件 + rename）
+  res.json({ ok: true, applied: plan, ...snapshot() });
 });
 
 // ---- 片段排练单（只读，不修改原提示单）----

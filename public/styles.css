@@ -252,3 +252,15 @@ tr.row-error { background: rgba(107,102,128,.12); }
 }
 .frag-h3 { font-size: 14px; margin: 16px 0 8px; color: var(--text); }
 .frag-subpanel h3.frag-h3 { margin-top: 4px; }
+
+/* ---------- 冲突顺延预演 ---------- */
+.conflict-actions { display: inline-flex; gap: 6px; margin-left: 10px; }
+.conflict-list li { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.conflict-list li .conflict-actions { margin-left: auto; }
+#deferPanel .hint { margin-bottom: 10px; }
+#deferError { margin: 10px 0 0; }
+#deferResult .form-actions { margin-top: 14px; }
+.defer-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+@media (max-width: 760px) {
+  .defer-diff { grid-template-columns: 1fr; }
+}
