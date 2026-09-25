@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>演出提示单 · 小剧场排练</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <h1>🎭 演出提示单 <span class="sub">小剧场排练用</span></h1>
+      <p class="hint">区间按<strong>左闭右开 [开始, 结束)</strong>绘制；同一独占通道时间重叠会标红冲突，首尾相接不算冲突。冲突允许保留，供排练现场调整。</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div id="banner" class="banner hidden"></div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2 id="timelineTitle">时间轴（按通道）</h2>
+        <div class="legend">
+          <span class="lg lg-ok"></span> 正常
+          <span class="lg lg-bad"></span> 冲突时段
+          <span class="lg lg-unknown"></span> 时间未定（引用/环问题）
+        </div>
+      </div>
+      <div id="timeline"></div>
+    </section>
+
+    <section class="panel" id="conflictPanel" hidden>
+      <h2>⚠️ 通道冲突（可保留，仅作排练提醒）</h2>
+      <ul id="conflictList" class="conflict-list"></ul>
+    </section>
+
+    <section class="panel" id="fragmentPanel">
+      <h2>✂️ 片段排练单（按原演出时间窗截取）</h2>
+      <p class="hint">
+        输入原演出时间窗 <strong>[起, 止)</strong>（左闭右开，秒），可在页面预览片段时间轴与通道冲突，并下载一份
+        <strong>独立可用</strong>的 JSON 提示单（时间已平移到从 0 开始）。原提示单不会被修改。
+        前置未入选或提示跨左边界时，该提示会改为<strong>固定开始</strong>，保证下载文件无悬空引用。
+      </p>
+      <form id="fragmentForm" class="frag-form">
+        <div class="frag-inputs">
+          <label>窗口起点（秒，含）
+            <input type="number" id="fr-start" min="0" step="0.1" value="30" required />
+          </label>
+          <label>窗口止点（秒，不含）
+            <input type="number" id="fr-end" min="0" step="0.1" value="70" required />
+          </label>
+          <div class="frag-actions">
+            <button type="submit" class="btn primary" id="frPreviewBtn">生成预览</button>
+            <button type="button" class="btn" id="frDownloadBtn" disabled>下载片段 JSON</button>
+          </div>
+        </div>
+      </form>
+      <div id="fragError" class="banner err hidden"></div>
+      <div id="fragResult" class="frag-result" hidden>
+        <div class="frag-meta" id="fragMeta"></div>
+
+        <h3 class="frag-h3">片段时间轴（时间已平移到 0）</h3>
+        <div id="fragTimeline"></div>
+
+        <section class="frag-subpanel" id="fragConflictPanel" hidden>
+          <h3 class="frag-h3">⚠️ 片段通道冲突（左闭右开）</h3>
+          <ul id="fragConflictList" class="conflict-list"></ul>
+        </section>
+
+        <h3 class="frag-h3">片段提示列表</h3>
+        <div class="table-wrap">
+          <table id="fragTable">
+            <thead>
+              <tr>
+                <th>#</th><th>名称</th><th>独占通道</th><th>持续(s)</th><th>开始方式</th><th>开始(s)</th><th>结束(s)</th><th>原区间(s)</th><th>说明</th>
+              </tr>
+            </thead>
+            <tbody id="fragTbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 id="formTitle">➕ 新增提示</h2>
+      <form id="cueForm" class="cue-form">
+        <input type="hidden" id="f-id" />
+        <div class="grid">
+          <label>名称
+            <input type="text" id="f-name" maxlength="80" placeholder="例如：第一幕追光" required />
+          </label>
+          <label>独占设备通道
+            <input type="text" id="f-channel" maxlength="40" placeholder="例如：灯光台 A / 调音台 M" required />
+          </label>
+          <label>持续秒数
+            <input type="number" id="f-duration" min="0" step="0.1" placeholder="秒" required />
+          </label>
+        </div>
+
+        <fieldset class="start-box">
+          <legend>开始时间</legend>
+          <div class="seg">
+            <label><input type="radio" name="startType" value="fixed" checked /> 固定演出秒数</label>
+            <label><input type="radio" name="startType" value="after" /> 另一提示结束后</label>
+          </div>
+          <div id="fixedBox" class="start-detail">
+            <label>从演出开始第
+              <input type="number" id="f-fixedAt" min="0" step="0.1" value="0" /> 秒
+            </label>
+          </div>
+          <div id="afterBox" class="start-detail" hidden>
+            <label>在
+              <select id="f-afterCueId"></select>
+              结束后
+            </label>
+            <label>延迟
+              <input type="number" id="f-delayAfter" min="0" step="0.1" value="0" /> 秒开始
+            </label>
+          </div>
+        </fieldset>
+
+        <div class="form-actions">
+          <button type="submit" id="submitBtn" class="btn primary">保存新增</button>
+          <button type="button" id="cancelEdit" class="btn ghost" hidden>取消编辑</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>提示列表</h2>
+      <div class="table-wrap">
+        <table id="cueTable">
+          <thead>
+            <tr>
+              <th>#</th><th>名称</th><th>独占通道</th><th>持续(s)</th><th>开始方式</th><th>重算开始</th><th>结束(s)</th><th>状态</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="cueTbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

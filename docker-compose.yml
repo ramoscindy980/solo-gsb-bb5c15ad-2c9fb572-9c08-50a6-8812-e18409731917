@@ -1,0 +1,19 @@
+services:
+  cue-sheet:
+    build: .
+    image: cue-sheet:latest
+    container_name: cue-sheet
+    ports:
+      - "${HOST_PORT:-3000}:3000"
+    volumes:
+      # 本地 JSON 数据持久化到宿主机 ./data；首次启动若文件不存在会自动初始化示例数据
+      - ./data:/app/data
+    environment:
+      PORT: "3000"
+      DATA_FILE: /app/data/cues.json
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      retries: 3

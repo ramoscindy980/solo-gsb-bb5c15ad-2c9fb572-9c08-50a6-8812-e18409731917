@@ -1,0 +1,15 @@
+{
+  "name": "cue-sheet",
+  "version": "1.0.0",
+  "description": "小剧场排练演出提示单（Cue Sheet）— Node.js/Express + 原生前端，数据保存在本地 JSON",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
